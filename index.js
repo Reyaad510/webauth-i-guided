@@ -1,6 +1,9 @@
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+
+
 
 const db = require('./database/dbConfig.js');
 const Users = require('./users/users-model.js');
@@ -15,8 +18,22 @@ server.get('/', (req, res) => {
   res.send("It's alive!");
 });
 
+
+// Register
+
 server.post('/api/register', (req, res) => {
   let user = req.body;
+
+  if (!user.username || !user.password) {
+    return res.status(500).json({ message: "Need name and pass" })
+  }
+
+  if (user.password.length < 8) {
+    return res.status(400).json({ message: 'Pass too short!' })
+  }
+
+  const hash = bcrypt.hashSync(user.password, 14);
+  user.password = hash;
 
   Users.add(user)
     .then(saved => {
@@ -27,13 +44,20 @@ server.post('/api/register', (req, res) => {
     });
 });
 
+
+// LOGIN
 server.post('/api/login', (req, res) => {
   let { username, password } = req.body;
+
 
   Users.findBy({ username })
     .first()
     .then(user => {
-      if (user) {
+      if(!username || !password) {
+        return res.status(401).json({ message: 'Invalid Credentials' })
+      }
+
+      if (user && bcrypt.compareSync(password, user.password)) {
         res.status(200).json({ message: `Welcome ${user.username}!` });
       } else {
         res.status(401).json({ message: 'Invalid Credentials' });
@@ -44,7 +68,32 @@ server.post('/api/login', (req, res) => {
     });
 });
 
-server.get('/api/users', (req, res) => {
+
+// MIDDLE WARE
+function authorize(req, res, next) {
+  const username = req.headers['x-username'];
+  const password = req.headers['x-password'];
+
+  Users.findBy({ username })
+    .first()
+    .then(user => {
+
+      if(!username || !password) {
+        return res.status(401).json({ message: 'Invalid Credentials' })
+      }
+
+      if (user && bcrypt.compareSync(password, user.password)) {
+        next()
+      } else {
+        res.status(401).json({ message: 'Invalid Credentials' });
+      }
+    })
+    .catch(error => {
+      res.status(500).json(error);
+    });
+}
+
+server.get('/api/users', authorize, (req, res) => {
   Users.find()
     .then(users => {
       res.json(users);
